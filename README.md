@@ -1,8 +1,8 @@
 # Dual YouTube Caption Overlay
 
-A Manifest V3 Chrome extension that displays two YouTube-provided caption tracks at the same time.
+A ***Manifest V3 Chrome extension*** that displays two YouTube-provided caption tracks at the same time.
 
-The extension reads YouTube official caption metadata, including auto-generated captions and YouTube auto-translate tracks. It does not use external translation APIs and does not scrape YouTube's native caption DOM.
+The extension reads YouTube official caption metadata, including auto-generated captions and YouTube auto-translate tracks. ***It does not use external translation APIs and does not scrape YouTube's native caption DOM.***
 
 ![Dual YouTube Caption Overlay screenshot 1](./1.jpg)
 
