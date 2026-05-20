@@ -1,0 +1,203 @@
+.dyco-overlay {
+  --dyco-bg-opacity: 0.72;
+  position: fixed;
+  left: 50%;
+  top: auto;
+  bottom: max(8vh, 72px);
+  z-index: 2147483646;
+  transform: translateX(-50%);
+  width: min(88vw, 960px);
+  pointer-events: none;
+  user-select: none;
+  box-sizing: border-box;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  font-family: Roboto, Arial, sans-serif;
+  font-size: clamp(12px, 2.4vw, 72px);
+  line-height: 1.25;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.dyco-overlay.dyco-visible {
+  display: flex;
+}
+
+.dyco-line {
+  display: inline-block;
+  max-width: 100%;
+  width: fit-content;
+  min-height: 1.25em;
+  padding: 0.18em 0.45em;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, var(--dyco-bg-opacity));
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.dyco-line-secondary {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.88em;
+}
+
+.dyco-panel {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 2147483647;
+  width: min(360px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.92);
+  color: #f5f5f5;
+  font-family: Roboto, Arial, sans-serif;
+  font-size: 13px;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.38);
+}
+
+.dyco-panel-hidden {
+  display: none;
+}
+
+.dyco-panel.dyco-collapsed .dyco-panel-body {
+  display: none;
+}
+
+.dyco-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dyco-panel-title {
+  min-width: 0;
+  flex: 1;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.dyco-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dyco-icon-button,
+.dyco-button {
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.dyco-icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.dyco-button {
+  padding: 7px 10px;
+}
+
+.dyco-field {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.dyco-field label {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+
+.dyco-select,
+.dyco-range {
+  width: 100%;
+}
+
+.dyco-select {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: #1f1f1f;
+  color: #fff;
+  font: inherit;
+}
+
+.dyco-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.dyco-status {
+  min-height: 18px;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 12px;
+}
+
+.dyco-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dyco-switch input {
+  width: 36px;
+  height: 20px;
+}
+
+.dyco-player-button {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: auto !important;
+  min-width: 48px;
+  padding: 0 8px !important;
+  color: #fff !important;
+  font: 600 12px/1 Roboto, Arial, sans-serif !important;
+  opacity: 0.9;
+}
+
+.dyco-player-button:hover,
+.dyco-player-button-active {
+  opacity: 1;
+  color: #3ea6ff !important;
+}
+
+.dyco-player-button-floating {
+  position: fixed !important;
+  z-index: 2147483647;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.86);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 640px) {
+  .dyco-panel {
+    width: calc(100vw - 24px);
+  }
+
+  .dyco-overlay {
+    width: calc(100vw - 24px);
+    font-size: clamp(12px, 5vw, 56px);
+  }
+}

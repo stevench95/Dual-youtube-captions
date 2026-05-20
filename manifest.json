@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Dual YouTube Caption Overlay",
+  "description": "Display two YouTube-provided caption tracks at the same time.",
+  "version": "1.0.0",
+  "permissions": ["storage", "activeTab", "webRequest"],
+  "host_permissions": ["https://www.youtube.com/*", "https://*.googlevideo.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Dual YouTube Captions"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["utils/captionParser.js", "utils/timeSync.js", "content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["overlay.css", "bridge.js"],
+      "matches": ["https://www.youtube.com/*"]
+    }
+  ]
+}

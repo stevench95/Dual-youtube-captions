@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dual YouTube Captions</title>
+    <style>
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 14px;
+        background: #161616;
+        color: #f5f5f5;
+        font-family: Arial, sans-serif;
+        font-size: 13px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 15px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        color: rgba(255, 255, 255, 0.72);
+        line-height: 1.4;
+      }
+
+      button {
+        width: 100%;
+        min-height: 34px;
+        border: 0;
+        border-radius: 6px;
+        background: #3ea6ff;
+        color: #050505;
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      #dyco-status {
+        min-height: 18px;
+        margin-top: 10px;
+        color: rgba(255, 255, 255, 0.72);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Dual YouTube Captions</h1>
+    <p>Open a YouTube video and use the floating panel to choose primary and secondary YouTube caption tracks.</p>
+    <button id="dyco-toggle">Toggle overlay</button>
+    <div id="dyco-status" role="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
