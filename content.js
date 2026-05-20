@@ -7,14 +7,15 @@
   const REQUEST_TYPE = "DYCO_REQUEST_PLAYER_RESPONSE";
   const PRIME_TYPE = "DYCO_PRIME_CAPTIONS";
   const DEFAULT_SETTINGS = {
-    enabled: true,
+    enabled: false,
     primaryKey: "",
     secondaryKey: "",
     fontScale: 1,
     backgroundOpacity: 0.72,
     panelOpen: false,
     panelCollapsed: false,
-    uiLanguage: "en"
+    uiLanguage: "en",
+    overlayDefaultOffMigrated: false
   };
 
   const UI_TEXT = {
@@ -96,10 +97,16 @@
     createUi();
     bindMessages();
 
+    const storedSettings = (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY];
     state.settings = {
       ...DEFAULT_SETTINGS,
-      ...(await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY]
+      ...storedSettings
     };
+    if (!storedSettings || !storedSettings.overlayDefaultOffMigrated) {
+      state.settings.enabled = false;
+      state.settings.overlayDefaultOffMigrated = true;
+      chrome.storage.local.set({ [STORAGE_KEY]: state.settings });
+    }
     applySettingsToUi();
     state.currentVideoId = getVideoId();
 
@@ -182,11 +189,7 @@
           <label for="dyco-secondary" data-i18n="secondary">Secondary caption</label>
           <select id="dyco-secondary" class="dyco-select"></select>
         </div>
-        <div class="dyco-row">
-          <label class="dyco-switch">
-            <input id="dyco-enabled" type="checkbox">
-            <span data-i18n="overlay">Overlay</span>
-          </label>
+        <div class="dyco-row dyco-refresh-row">
           <button class="dyco-button" type="button" data-action="refresh" data-i18n="refresh">Refresh</button>
         </div>
         <div class="dyco-field">
@@ -198,6 +201,12 @@
           <input id="dyco-opacity" class="dyco-range" type="range" min="0" max="0.95" step="0.05">
         </div>
         <div class="dyco-status" aria-live="polite"></div>
+        <div class="dyco-panel-footer">
+          <label class="dyco-switch">
+            <span data-i18n="overlay">Overlay</span>
+            <input id="dyco-enabled" type="checkbox">
+          </label>
+        </div>
       </div>
     `;
 
@@ -217,6 +226,10 @@
       state.settings.enabled = dom.enabledToggle.checked;
       saveSettings();
       updateOverlayVisibility();
+      if (state.settings.enabled) {
+        state.settings.panelOpen = false;
+        applyPanelOpen();
+      }
       if (state.sync) state.sync.flush();
     });
     dom.fontRange.addEventListener("input", () => {

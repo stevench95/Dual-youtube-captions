@@ -146,6 +146,16 @@
   margin-bottom: 10px;
 }
 
+.dyco-refresh-row {
+  justify-content: flex-end;
+}
+
+.dyco-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
 .dyco-status {
   min-height: 18px;
   color: rgba(255, 255, 255, 0.66);
@@ -155,7 +165,7 @@
 .dyco-switch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
 }
 
 .dyco-switch input {
