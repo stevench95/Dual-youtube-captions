@@ -140,12 +140,23 @@
       positionPanelToVideo();
       positionFallbackButton();
     });
+    window.addEventListener("scroll", handleViewportChange, { passive: true });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("scroll", handleViewportChange, { passive: true });
+      window.visualViewport.addEventListener("resize", handleViewportChange, { passive: true });
+    }
     document.addEventListener("fullscreenchange", () => {
       positionOverlayToVideo();
       positionPanelToVideo();
       positionFallbackButton();
       ensurePlayerButton();
     });
+  }
+
+  function handleViewportChange() {
+    positionOverlayToVideo();
+    positionPanelToVideo();
+    positionFallbackButton();
   }
 
   function injectPlayerResponseBridge() {
