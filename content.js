@@ -331,10 +331,13 @@
     state.secondaryCaptions = [];
     state.primaryCursor = -1;
     state.secondaryCursor = -1;
+    state.settings.enabled = false;
+    dom.enabledToggle.checked = false;
     state.fetchCache.clear();
     renderTrackOptions();
     clearRenderedText();
     setStatus(nextVideoId ? "Loading captions for this video." : "No YouTube video detected.");
+    saveSettings();
     requestPlayerResponseDebounced();
   }
 
@@ -466,6 +469,7 @@
     if (!keys.has(state.settings.secondaryKey)) {
       state.settings.secondaryKey = getDefaultSecondaryKey(state.settings.primaryKey);
     }
+    state.settings.secondaryKey = getAutoSecondaryKey(state.settings.primaryKey, state.settings.secondaryKey);
 
     dom.primarySelect.value = state.settings.primaryKey;
     dom.secondarySelect.value = state.settings.secondaryKey;
@@ -611,6 +615,10 @@
 
   function updateSelection(key, value) {
     state.settings[key] = value;
+    if (key === "primaryKey") {
+      state.settings.secondaryKey = getAutoSecondaryKey(value, state.settings.secondaryKey);
+      dom.secondarySelect.value = state.settings.secondaryKey;
+    }
     saveSettings();
     loadSelectedCaptions();
   }
@@ -634,6 +642,41 @@
   function getDefaultSecondaryKey(primaryKey) {
     const different = state.options.find((option) => option.key !== primaryKey);
     return different ? different.key : "";
+  }
+
+  function getAutoSecondaryKey(primaryKey, fallbackKey) {
+    const primary = getOption(primaryKey);
+    if (!primary) return fallbackKey;
+
+    if (isEnglishOption(primary)) {
+      const zhHant = findTraditionalChineseSecondary(primaryKey);
+      if (zhHant) return zhHant.key;
+    }
+
+    if (isTraditionalChineseOption(primary)) {
+      const english = findEnglishSecondary(primaryKey);
+      if (english) return english.key;
+    }
+
+    return fallbackKey;
+  }
+
+  function isEnglishOption(option) {
+    return normalizeLanguageCode(option && option.track && option.track.languageCode) === "en";
+  }
+
+  function isTraditionalChineseOption(option) {
+    return normalizeLanguageCode(option && option.track && option.track.languageCode) === "zh-Hant";
+  }
+
+  function findTraditionalChineseSecondary(primaryKey) {
+    return state.options.find((option) => option.key !== primaryKey && option.type === "translation" && isTraditionalChineseOption(option)) ||
+      state.options.find((option) => option.key !== primaryKey && isTraditionalChineseOption(option));
+  }
+
+  function findEnglishSecondary(primaryKey) {
+    return state.options.find((option) => option.key !== primaryKey && option.type === "track" && isEnglishOption(option)) ||
+      state.options.find((option) => option.key !== primaryKey && isEnglishOption(option));
   }
 
   function bindVideo() {
