@@ -493,7 +493,7 @@
     clearRenderedText();
 
     const primaryOption = getOption(state.settings.primaryKey);
-    const secondaryOption = getOption(state.settings.secondaryKey);
+    const secondaryOption = resolveSecondaryOption(getOption(state.settings.secondaryKey), primaryOption);
 
     try {
       const primary = await fetchCaptions(primaryOption);
@@ -562,6 +562,27 @@
 
     state.fetchCache.set(url, promise);
     return promise;
+  }
+
+  function resolveSecondaryOption(secondaryOption, primaryOption) {
+    if (!secondaryOption || secondaryOption.type !== "translation" || !isAuthorProvidedTrack(primaryOption)) {
+      return secondaryOption;
+    }
+
+    return {
+      ...secondaryOption,
+      track: {
+        ...primaryOption.track,
+        languageCode: secondaryOption.track.languageCode,
+        name: secondaryOption.track.name,
+        sourceLanguageCode: primaryOption.track.languageCode,
+        translationLanguageCode: secondaryOption.track.translationLanguageCode || secondaryOption.track.languageCode
+      }
+    };
+  }
+
+  function isAuthorProvidedTrack(option) {
+    return Boolean(option && option.type === "track" && option.track && option.track.baseUrl && option.track.kind !== "asr");
   }
 
   async function fetchAndParseCaptionUrl(url) {
