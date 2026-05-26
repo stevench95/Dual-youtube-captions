@@ -525,42 +525,62 @@
 
     const url = parser.makeCaptionUrl(option.track);
     if (!url) return [];
-    if (state.fetchCache.has(url)) return state.fetchCache.get(url);
+    const preferNativeTranslation = Boolean(option.preferNativeTranslation && option.track.translationLanguageCode);
+    const cacheKey = preferNativeTranslation ? `native:${url}` : url;
+    if (state.fetchCache.has(cacheKey)) return state.fetchCache.get(cacheKey);
 
     const promise = (async () => {
       let directError = null;
+      let capturedError = null;
       let captions = [];
 
-      try {
-        captions = await fetchAndParseCaptionUrl(url);
-      } catch (error) {
-        directError = error;
+      if (!preferNativeTranslation) {
+        try {
+          captions = await fetchAndParseCaptionUrl(url);
+        } catch (error) {
+          directError = error;
+        }
+
+        if (captions.length) return captions;
       }
 
-      if (captions.length) return captions;
-
+      const startedAt = Date.now();
       primeYouTubeCaptions(option.track);
-      const capturedUrl = await waitForCapturedTimedText(option.track);
-      if (!capturedUrl) {
-        if (directError) throw directError;
-        return captions;
+      const captured = await waitForCapturedTimedText(option.track, startedAt);
+      if (captured.url) {
+        try {
+          const resolvedUrl = option.track.translationLanguageCode
+            ? parser.makeTranslatedCapturedUrl(captured.url, option.track.translationLanguageCode)
+            : parser.makeCaptionUrl({
+              ...option.track,
+              baseUrl: captured.url
+            });
+          const capturedCaptions = await fetchAndParseCaptionUrl(resolvedUrl);
+          if (capturedCaptions.length) return capturedCaptions;
+        } catch (error) {
+          capturedError = error;
+        }
       }
 
-      const resolvedUrl = option.track.translationLanguageCode
-        ? parser.makeTranslatedCapturedUrl(capturedUrl, option.track.translationLanguageCode)
-        : parser.makeCaptionUrl({
-          ...option.track,
-          baseUrl: capturedUrl
-        });
+      if (preferNativeTranslation) {
+        try {
+          captions = await fetchAndParseCaptionUrl(url);
+        } catch (error) {
+          directError = error;
+        }
+        if (captions.length) return captions;
+      }
 
-      return fetchAndParseCaptionUrl(resolvedUrl);
+      if (directError) throw directError;
+      if (capturedError) throw capturedError;
+      return captions;
     })()
       .catch((error) => {
-        state.fetchCache.delete(url);
+        state.fetchCache.delete(cacheKey);
         throw error;
       });
 
-    state.fetchCache.set(url, promise);
+    state.fetchCache.set(cacheKey, promise);
     return promise;
   }
 
@@ -577,7 +597,8 @@
         name: secondaryOption.track.name,
         sourceLanguageCode: primaryOption.track.languageCode,
         translationLanguageCode: secondaryOption.track.translationLanguageCode || secondaryOption.track.languageCode
-      }
+      },
+      preferNativeTranslation: true
     };
   }
 
@@ -607,13 +628,14 @@
       payload: {
         languageCode: track.languageCode,
         sourceLanguageCode: track.sourceLanguageCode,
+        translationLanguageCode: track.translationLanguageCode,
         kind: track.kind,
         vssId: track.vssId
       }
     }, window.location.origin);
   }
 
-  async function waitForCapturedTimedText(track) {
+  async function waitForCapturedTimedText(track, startedAt) {
     const videoId = getVideoId();
     const languageCode = track.sourceLanguageCode || track.languageCode || "";
     const kind = track.kind || "";
@@ -625,13 +647,15 @@
         videoId,
         languageCode,
         kind,
-        requirePot: true
+        targetLanguageCode: track.translationLanguageCode || "",
+        startedAt,
+        requirePot: attempt < 8
       });
 
-      if (response && response.url) return response.url;
+      if (response && response.url) return response;
     }
 
-    return "";
+    return { url: "" };
   }
 
   function updateSelection(key, value) {

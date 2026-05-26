@@ -10,7 +10,10 @@
         url: details.url,
         videoId: url.searchParams.get("v") || "",
         languageCode: url.searchParams.get("lang") || "",
+        targetLanguageCode: url.searchParams.get("tlang") || "",
         kind: url.searchParams.get("kind") || "",
+        format: url.searchParams.get("fmt") || "",
+        name: url.searchParams.get("name") || "",
         hasPot: Boolean(url.searchParams.get("pot")),
         timestamp: Date.now()
       });
@@ -26,16 +29,33 @@
     if (message && message.type === "DYCO_GET_CAPTURED_TIMEDTEXT") {
       const maxAgeMs = 15000;
       const now = Date.now();
-      const match = capturedTimedText.find((item) => {
+      const candidates = capturedTimedText.filter((item) => {
         if (now - item.timestamp > maxAgeMs) return false;
+        if (message.startedAt && item.timestamp < message.startedAt) return false;
         if (message.videoId && item.videoId !== message.videoId) return false;
         if (message.languageCode && item.languageCode !== message.languageCode) return false;
         if (message.kind && item.kind && item.kind !== message.kind) return false;
         if (message.requirePot && !item.hasPot) return false;
         return true;
       });
+      let match = null;
+      if (message.targetLanguageCode) {
+        match = candidates.find((item) => item.targetLanguageCode === message.targetLanguageCode);
+      }
+      if (!match) {
+        match = candidates.find((item) => !item.targetLanguageCode);
+      }
+      if (!match) {
+        match = candidates[0];
+      }
 
-      sendResponse({ url: match ? match.url : "" });
+      sendResponse({
+        url: match ? match.url : "",
+        languageCode: match ? match.languageCode : "",
+        targetLanguageCode: match ? match.targetLanguageCode : "",
+        format: match ? match.format : "",
+        timestamp: match ? match.timestamp : 0
+      });
       return false;
     }
 

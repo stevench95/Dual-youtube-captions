@@ -97,6 +97,14 @@
           kind: track.kind || undefined,
           vssId: track.vssId || undefined
         });
+        if (track.translationLanguageCode) {
+          try {
+            player.setOption("captions", "translationLanguage", {
+              languageCode: track.translationLanguageCode
+            });
+          } catch (error) {
+          }
+        }
       }
       player.toggleSubtitlesOn();
     } catch (error) {
