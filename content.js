@@ -62,6 +62,7 @@
 
   const parser = window.DYCO.captionParser;
   const timeSync = window.DYCO.timeSync;
+  const zhHansToHant = window.DYCO.zhHansToHant;
 
   const state = {
     settings: { ...DEFAULT_SETTINGS },
@@ -502,7 +503,7 @@
 
     const [primaryResult, secondaryResult] = await Promise.all([
       loadCaptionSet(primaryOption),
-      loadCaptionSet(secondaryOption)
+      loadCaptionSet(secondaryOption, { fixTraditionalChinese: true })
     ]);
 
     if (loadVideoId !== state.currentVideoId || state.activePrimaryKey !== state.settings.primaryKey || state.activeSecondaryKey !== state.settings.secondaryKey) {
@@ -536,10 +537,10 @@
     if (state.sync) state.sync.flush();
   }
 
-  async function loadCaptionSet(option) {
+  async function loadCaptionSet(option, settings = {}) {
     try {
       return {
-        captions: await fetchCaptions(option),
+        captions: await fetchCaptions(option, settings),
         error: null
       };
     } catch (error) {
@@ -550,13 +551,14 @@
     }
   }
 
-  async function fetchCaptions(option) {
+  async function fetchCaptions(option, settings = {}) {
     if (!option || !option.track) return [];
 
-    const url = parser.makeCaptionUrl(option.track);
+    const fetchOption = getCaptionFetchOption(option, settings);
+    const url = parser.makeCaptionUrl(fetchOption.track);
     if (!url) return [];
-    const isTranslation = Boolean(option.track.translationLanguageCode);
-    const cacheKey = url;
+    const isTranslation = Boolean(fetchOption.track.translationLanguageCode);
+    const cacheKey = `${url}|hant:${Boolean(fetchOption.track.convertFromSimplifiedChinese)}`;
     if (state.fetchCache.has(cacheKey)) return state.fetchCache.get(cacheKey);
 
     const promise = (async () => {
@@ -570,23 +572,23 @@
         directError = error;
       }
 
-      if (captions.length) return captions;
+      if (captions.length) return finalizeCaptions(captions, fetchOption);
       if (isRateLimitError(directError)) throw directError;
 
       const startedAt = Date.now();
-      const sourceTrack = isTranslation ? getSourceTrackForTranslation(option.track) : option.track;
+      const sourceTrack = isTranslation ? getSourceTrackForTranslation(fetchOption.track) : fetchOption.track;
       primeYouTubeCaptions(sourceTrack);
       const captured = await waitForCapturedTimedText(sourceTrack, startedAt);
       if (captured.url) {
         try {
           const resolvedUrl = isTranslation
-            ? parser.makeTranslatedCapturedUrl(captured.url, option.track.translationLanguageCode)
+            ? parser.makeTranslatedCapturedUrl(captured.url, fetchOption.track.translationLanguageCode)
             : parser.makeCaptionUrl({
-              ...option.track,
+              ...fetchOption.track,
               baseUrl: captured.url
             });
           const capturedCaptions = await fetchAndParseCaptionUrl(resolvedUrl);
-          if (capturedCaptions.length) return capturedCaptions;
+          if (capturedCaptions.length) return finalizeCaptions(capturedCaptions, fetchOption);
         } catch (error) {
           capturedError = error;
         }
@@ -603,6 +605,36 @@
 
     state.fetchCache.set(cacheKey, promise);
     return promise;
+  }
+
+  function getCaptionFetchOption(option, settings) {
+    if (!settings.fixTraditionalChinese || !isTraditionalChineseTranslation(option)) return option;
+
+    return {
+      ...option,
+      track: {
+        ...option.track,
+        languageCode: "zh-Hans",
+        translationLanguageCode: "zh-Hans",
+        displayLanguageCode: option.track.languageCode,
+        convertFromSimplifiedChinese: true
+      }
+    };
+  }
+
+  function finalizeCaptions(captions, option) {
+    if (!option || !option.track || !option.track.convertFromSimplifiedChinese) return captions;
+    return zhHansToHant ? zhHansToHant.convertCaptions(captions) : captions;
+  }
+
+  function isTraditionalChineseTranslation(option) {
+    return Boolean(
+      option &&
+      option.type === "translation" &&
+      option.track &&
+      option.track.translationLanguageCode &&
+      normalizeLanguageCode(option.track.translationLanguageCode) === "zh-Hant"
+    );
   }
 
   function resolveSecondaryOption(secondaryOption, primaryOption) {

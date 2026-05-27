@@ -15,7 +15,7 @@
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],
-      "js": ["utils/captionParser.js", "utils/timeSync.js", "content.js"],
+      "js": ["utils/captionParser.js", "utils/timeSync.js", "utils/zhHansToHant.js", "utils/zhHansToHantAdapter.js", "content.js"],
       "css": ["overlay.css"],
       "run_at": "document_idle"
     }
