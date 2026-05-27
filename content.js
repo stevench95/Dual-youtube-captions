@@ -85,7 +85,8 @@
     observer: null,
     saveTimer: 0,
     responseRequestTimer: 0,
-    buttonRetryTimer: 0
+    buttonRetryTimer: 0,
+    rateLimitedUntil: 0
   };
 
   const dom = {};
@@ -124,7 +125,6 @@
       handleVideoNavigationChange();
       bindVideo();
       scheduleEnsurePlayerButton();
-      requestPlayerResponseDebounced();
     });
     state.observer.observe(document.documentElement, { childList: true, subtree: true });
 
@@ -240,6 +240,7 @@
       if (state.settings.enabled) {
         state.settings.panelOpen = false;
         applyPanelOpen();
+        loadSelectedCaptions();
       }
       if (state.sync) state.sync.flush();
     });
@@ -302,7 +303,7 @@
     const translations = Array.isArray(detail && detail.translationLanguages) ? detail.translationLanguages : [];
     const signature = JSON.stringify({
       videoId,
-      tracks: tracks.map((track) => [track.languageCode, track.name, track.kind, track.vssId, track.baseUrl]),
+      tracks: tracks.map((track) => [track.languageCode, track.name, track.kind, track.vssId]),
       translations: translations.map((language) => [language.languageCode, language.name])
     });
 
@@ -315,7 +316,9 @@
 
     renderTrackOptions();
     ensureValidSelections();
-    loadSelectedCaptions();
+    if (state.settings.enabled) {
+      loadSelectedCaptions();
+    }
   }
 
   function handleVideoNavigationChange() {
@@ -483,6 +486,8 @@
   }
 
   async function loadSelectedCaptions() {
+    if (!state.settings.enabled) return;
+
     const loadVideoId = state.currentVideoId;
     state.activePrimaryKey = state.settings.primaryKey;
     state.activeSecondaryKey = state.settings.secondaryKey;
@@ -495,28 +500,53 @@
     const primaryOption = getOption(state.settings.primaryKey);
     const secondaryOption = resolveSecondaryOption(getOption(state.settings.secondaryKey), primaryOption);
 
-    try {
-      const primary = await fetchCaptions(primaryOption);
-      const secondary = await fetchCaptions(secondaryOption);
+    const [primaryResult, secondaryResult] = await Promise.all([
+      loadCaptionSet(primaryOption),
+      loadCaptionSet(secondaryOption)
+    ]);
 
-      if (loadVideoId !== state.currentVideoId || state.activePrimaryKey !== state.settings.primaryKey || state.activeSecondaryKey !== state.settings.secondaryKey) {
-        return;
-      }
+    if (loadVideoId !== state.currentVideoId || state.activePrimaryKey !== state.settings.primaryKey || state.activeSecondaryKey !== state.settings.secondaryKey) {
+      return;
+    }
 
-      state.primaryCaptions = primary;
-      state.secondaryCaptions = secondary;
-      const hasSelection = Boolean(primaryOption || secondaryOption);
-      if (!primary.length && !secondary.length && hasSelection) {
-        setStatus("YouTube returned empty caption data for the selected track(s). Native CC may be unavailable.");
-      } else if (!primary.length && !secondary.length) {
-        setStatus("Select one or two YouTube caption tracks.");
-      } else {
-        setStatus(`Captions loaded: primary ${primary.length}, secondary ${secondary.length}.`);
-      }
-      if (state.sync) state.sync.flush();
-    } catch (error) {
-      setStatus("Could not load selected captions.");
+    state.primaryCaptions = primaryResult.captions;
+    state.secondaryCaptions = secondaryResult.captions;
+    const primary = state.primaryCaptions;
+    const secondary = state.secondaryCaptions;
+    const errors = [primaryResult.error, secondaryResult.error].filter(Boolean);
+
+    errors.forEach((error) => {
       console.warn("[Dual YouTube Caption Overlay] Caption load failed", error);
+    });
+
+    const hasSelection = Boolean(primaryOption || secondaryOption);
+    if (errors.some(isRateLimitError)) {
+      setStatus("YouTube rate-limited caption requests. Wait briefly, then refresh captions.");
+    } else if (!primary.length && !secondary.length && errors.length) {
+      setStatus("Could not load selected captions.");
+    } else if (!primary.length && !secondary.length && hasSelection) {
+      setStatus("YouTube returned empty caption data for the selected track(s). Native CC may be unavailable.");
+    } else if (!primary.length && !secondary.length) {
+      setStatus("Select one or two YouTube caption tracks.");
+    } else if (errors.length) {
+      setStatus(`Captions partially loaded: primary ${primary.length}, secondary ${secondary.length}.`);
+    } else {
+      setStatus(`Captions loaded: primary ${primary.length}, secondary ${secondary.length}.`);
+    }
+    if (state.sync) state.sync.flush();
+  }
+
+  async function loadCaptionSet(option) {
+    try {
+      return {
+        captions: await fetchCaptions(option),
+        error: null
+      };
+    } catch (error) {
+      return {
+        captions: [],
+        error
+      };
     }
   }
 
@@ -525,8 +555,8 @@
 
     const url = parser.makeCaptionUrl(option.track);
     if (!url) return [];
-    const preferNativeTranslation = Boolean(option.preferNativeTranslation && option.track.translationLanguageCode);
-    const cacheKey = preferNativeTranslation ? `native:${url}` : url;
+    const isTranslation = Boolean(option.track.translationLanguageCode);
+    const cacheKey = url;
     if (state.fetchCache.has(cacheKey)) return state.fetchCache.get(cacheKey);
 
     const promise = (async () => {
@@ -534,22 +564,22 @@
       let capturedError = null;
       let captions = [];
 
-      if (!preferNativeTranslation) {
-        try {
-          captions = await fetchAndParseCaptionUrl(url);
-        } catch (error) {
-          directError = error;
-        }
-
-        if (captions.length) return captions;
+      try {
+        captions = await fetchAndParseCaptionUrl(url);
+      } catch (error) {
+        directError = error;
       }
 
+      if (captions.length) return captions;
+      if (isRateLimitError(directError)) throw directError;
+
       const startedAt = Date.now();
-      primeYouTubeCaptions(option.track);
-      const captured = await waitForCapturedTimedText(option.track, startedAt);
+      const sourceTrack = isTranslation ? getSourceTrackForTranslation(option.track) : option.track;
+      primeYouTubeCaptions(sourceTrack);
+      const captured = await waitForCapturedTimedText(sourceTrack, startedAt);
       if (captured.url) {
         try {
-          const resolvedUrl = option.track.translationLanguageCode
+          const resolvedUrl = isTranslation
             ? parser.makeTranslatedCapturedUrl(captured.url, option.track.translationLanguageCode)
             : parser.makeCaptionUrl({
               ...option.track,
@@ -560,15 +590,6 @@
         } catch (error) {
           capturedError = error;
         }
-      }
-
-      if (preferNativeTranslation) {
-        try {
-          captions = await fetchAndParseCaptionUrl(url);
-        } catch (error) {
-          directError = error;
-        }
-        if (captions.length) return captions;
       }
 
       if (directError) throw directError;
@@ -597,8 +618,7 @@
         name: secondaryOption.track.name,
         sourceLanguageCode: primaryOption.track.languageCode,
         translationLanguageCode: secondaryOption.track.translationLanguageCode || secondaryOption.track.languageCode
-      },
-      preferNativeTranslation: true
+      }
     };
   }
 
@@ -606,7 +626,22 @@
     return Boolean(option && option.type === "track" && option.track && option.track.baseUrl && option.track.kind !== "asr");
   }
 
+  function getSourceTrackForTranslation(track) {
+    if (!track || !track.translationLanguageCode) return track;
+    return {
+      ...track,
+      languageCode: track.sourceLanguageCode || track.languageCode,
+      translationLanguageCode: ""
+    };
+  }
+
   async function fetchAndParseCaptionUrl(url) {
+    if (Date.now() < state.rateLimitedUntil) {
+      const error = new Error("Caption request paused after YouTube rate limit.");
+      error.status = 429;
+      throw error;
+    }
+
     const response = await chrome.runtime.sendMessage({
       type: "DYCO_FETCH_CAPTIONS",
       url
@@ -615,10 +650,19 @@
     if (!response || !response.ok) {
       const status = response && response.status ? response.status : "network";
       const detail = response && response.error ? `: ${response.error}` : "";
-      throw new Error(`Caption request failed (${status})${detail}`);
+      const error = new Error(`Caption request failed (${status})${detail}`);
+      error.status = status;
+      if (status === 429) {
+        state.rateLimitedUntil = Date.now() + 60000;
+      }
+      throw error;
     }
 
     return parser.parseCaptionResponse(response.text);
+  }
+
+  function isRateLimitError(error) {
+    return Boolean(error && (error.status === 429 || /\(429\)/.test(error.message || "")));
   }
 
   function primeYouTubeCaptions(track) {
@@ -640,7 +684,7 @@
     const languageCode = track.sourceLanguageCode || track.languageCode || "";
     const kind = track.kind || "";
 
-    for (let attempt = 0; attempt < 12; attempt += 1) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
       await delay(250);
       const response = await chrome.runtime.sendMessage({
         type: "DYCO_GET_CAPTURED_TIMEDTEXT",
@@ -649,7 +693,7 @@
         kind,
         targetLanguageCode: track.translationLanguageCode || "",
         startedAt,
-        requirePot: attempt < 8
+        requirePot: attempt < 4
       });
 
       if (response && response.url) return response;
@@ -665,7 +709,11 @@
       dom.secondarySelect.value = state.settings.secondaryKey;
     }
     saveSettings();
-    loadSelectedCaptions();
+    if (state.settings.enabled) {
+      loadSelectedCaptions();
+    } else {
+      clearRenderedText();
+    }
   }
 
   function getOption(key) {
