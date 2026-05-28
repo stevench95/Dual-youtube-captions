@@ -638,7 +638,7 @@
   }
 
   function resolveSecondaryOption(secondaryOption, primaryOption) {
-    if (!secondaryOption || secondaryOption.type !== "translation" || !isAuthorProvidedTrack(primaryOption)) {
+    if (!secondaryOption || secondaryOption.type !== "translation" || !hasCaptionTrackSource(primaryOption)) {
       return secondaryOption;
     }
 
@@ -654,8 +654,8 @@
     };
   }
 
-  function isAuthorProvidedTrack(option) {
-    return Boolean(option && option.type === "track" && option.track && option.track.baseUrl && option.track.kind !== "asr");
+  function hasCaptionTrackSource(option) {
+    return Boolean(option && option.type === "track" && option.track && option.track.baseUrl);
   }
 
   function getSourceTrackForTranslation(track) {

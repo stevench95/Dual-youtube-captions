@@ -38,16 +38,10 @@
         if (message.requirePot && !item.hasPot) return false;
         return true;
       });
-      let match = null;
-      if (message.targetLanguageCode) {
-        match = candidates.find((item) => item.targetLanguageCode === message.targetLanguageCode);
-      }
-      if (!match) {
-        match = candidates.find((item) => !item.targetLanguageCode);
-      }
-      if (!match) {
-        match = candidates[0];
-      }
+      const sourceOnly = candidates.find((item) => !item.targetLanguageCode);
+      const match = message.targetLanguageCode
+        ? candidates.find((item) => item.targetLanguageCode === message.targetLanguageCode) || sourceOnly
+        : sourceOnly;
 
       sendResponse({
         url: match ? match.url : "",

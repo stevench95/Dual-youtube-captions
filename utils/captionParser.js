@@ -86,19 +86,18 @@
   function makeCaptionUrl(track) {
     if (!track || !track.baseUrl) return "";
 
-    let url = track.baseUrl;
-    const appendParam = (key, value) => {
-      url += `${url.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(value)}`;
-    };
+    const url = new URL(track.baseUrl, window.location.href);
 
-    if (!/[?&]fmt=/.test(url)) {
-      appendParam("fmt", "json3");
+    if (!url.searchParams.has("fmt")) {
+      url.searchParams.set("fmt", "json3");
     }
     if (track.translationLanguageCode) {
-      appendParam("tlang", track.translationLanguageCode);
+      url.searchParams.set("tlang", track.translationLanguageCode);
+    } else {
+      url.searchParams.delete("tlang");
     }
 
-    return url;
+    return url.toString();
   }
 
   function makeTranslatedCapturedUrl(capturedUrl, languageCode) {
