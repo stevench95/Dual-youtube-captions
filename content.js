@@ -578,7 +578,9 @@
       const startedAt = Date.now();
       const sourceTrack = isTranslation ? getSourceTrackForTranslation(fetchOption.track) : fetchOption.track;
       primeYouTubeCaptions(sourceTrack);
-      const captured = await waitForCapturedTimedText(sourceTrack, startedAt);
+      const captured = await waitForCapturedTimedText(isTranslation ? fetchOption.track : sourceTrack, startedAt, {
+        allowAnyTarget: isTranslation
+      });
       if (captured.url) {
         try {
           const resolvedUrl = isTranslation
@@ -711,7 +713,7 @@
     }, window.location.origin);
   }
 
-  async function waitForCapturedTimedText(track, startedAt) {
+  async function waitForCapturedTimedText(track, startedAt, settings = {}) {
     const videoId = getVideoId();
     const languageCode = track.sourceLanguageCode || track.languageCode || "";
     const kind = track.kind || "";
@@ -724,6 +726,7 @@
         languageCode,
         kind,
         targetLanguageCode: track.translationLanguageCode || "",
+        allowAnyTarget: Boolean(settings.allowAnyTarget),
         startedAt,
         requirePot: attempt < 4
       });

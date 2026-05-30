@@ -39,9 +39,12 @@
         return true;
       });
       const sourceOnly = candidates.find((item) => !item.targetLanguageCode);
-      const match = message.targetLanguageCode
+      let match = message.targetLanguageCode
         ? candidates.find((item) => item.targetLanguageCode === message.targetLanguageCode) || sourceOnly
         : sourceOnly;
+      if (!match && message.allowAnyTarget) {
+        match = candidates[0];
+      }
 
       sendResponse({
         url: match ? match.url : "",
