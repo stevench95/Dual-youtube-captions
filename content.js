@@ -881,7 +881,7 @@
     if (!rect.width || !rect.height) return;
 
     const width = Math.min(rect.width * 0.92, 1100);
-    const bottomPadding = Math.max(10, Math.min(42, rect.height * 0.055));
+    const bottomPadding = getOverlayBottomPadding(rect);
     const overlayHeight = dom.overlay.offsetHeight || 0;
     const top = Math.max(rect.top + 8, rect.bottom - bottomPadding - overlayHeight);
 
@@ -890,6 +890,38 @@
     dom.overlay.style.top = `${top}px`;
     dom.overlay.style.bottom = "auto";
     dom.overlay.style.transform = "translateX(-50%)";
+  }
+
+  function getOverlayBottomPadding(videoRect) {
+    const basePadding = Math.max(10, Math.min(42, videoRect.height * 0.055));
+    if (!isProgressBarActive()) return basePadding;
+
+    const chromeBottom = document.querySelector(".html5-video-player .ytp-chrome-bottom");
+    const progressBar = document.querySelector(".html5-video-player .ytp-progress-bar-container");
+    const liftTarget = chromeBottom || progressBar;
+    if (!liftTarget) return basePadding;
+
+    const targetRect = liftTarget.getBoundingClientRect();
+    if (!targetRect.width || !targetRect.height) return basePadding;
+
+    const targetTop = Math.max(videoRect.top, Math.min(videoRect.bottom, targetRect.top));
+    const gap = Math.max(8, Math.min(18, videoRect.height * 0.025));
+    return Math.max(basePadding, videoRect.bottom - targetTop + gap);
+  }
+
+  function isProgressBarActive() {
+    const player = document.querySelector(".html5-video-player");
+    if (player && player.classList.contains("ytp-progress-bar-hover")) return true;
+
+    return [
+      ".ytp-progress-bar-container",
+      ".ytp-progress-bar",
+      ".ytp-progress-list",
+      ".ytp-scrubber-container"
+    ].some((selector) => {
+      const element = document.querySelector(selector);
+      return Boolean(element && element.matches(":hover"));
+    });
   }
 
   function ensurePlayerButton() {
