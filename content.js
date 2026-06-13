@@ -25,6 +25,7 @@
       secondary: "Secondary caption",
       overlay: "Overlay",
       refresh: "Refresh",
+      refreshSecondary: "Refresh secondary",
       fontSize: "Font size",
       opacity: "Background opacity",
       none: "None",
@@ -39,6 +40,7 @@
       secondary: "第二字幕",
       overlay: "顯示字幕",
       refresh: "重新整理",
+      refreshSecondary: "重整第二字幕",
       fontSize: "字體大小",
       opacity: "背景透明度",
       none: "不選擇",
@@ -87,6 +89,7 @@
     saveTimer: 0,
     responseRequestTimer: 0,
     buttonRetryTimer: 0,
+    secondaryRefreshInFlight: false,
     rateLimitedUntil: 0
   };
 
@@ -203,6 +206,7 @@
         </div>
         <div class="dyco-row dyco-refresh-row">
           <button class="dyco-button" type="button" data-action="refresh" data-i18n="refresh">Refresh</button>
+          <button class="dyco-button" type="button" data-action="refresh-secondary" data-i18n="refreshSecondary">Refresh secondary</button>
         </div>
         <div class="dyco-field">
           <label for="dyco-font" data-i18n="fontSize">Font size</label>
@@ -231,6 +235,7 @@
     dom.languageButton = dom.panel.querySelector('[data-action="language"]');
     dom.collapseButton = dom.panel.querySelector('[data-action="collapse"]');
     dom.refreshButton = dom.panel.querySelector('[data-action="refresh"]');
+    dom.refreshSecondaryButton = dom.panel.querySelector('[data-action="refresh-secondary"]');
 
     dom.primarySelect.addEventListener("change", () => updateSelection("primaryKey", dom.primarySelect.value));
     dom.secondarySelect.addEventListener("change", () => updateSelection("secondaryKey", dom.secondarySelect.value));
@@ -267,6 +272,7 @@
       saveSettings();
     });
     dom.refreshButton.addEventListener("click", requestPlayerResponse);
+    dom.refreshSecondaryButton.addEventListener("click", refreshSecondaryCaptions);
 
     document.documentElement.append(dom.overlay, dom.panel);
   }
@@ -537,6 +543,68 @@
     if (state.sync) state.sync.flush();
   }
 
+  async function refreshSecondaryCaptions() {
+    if (state.secondaryRefreshInFlight) {
+      setStatus("Secondary captions are already refreshing.");
+      return;
+    }
+    if (!state.settings.enabled) {
+      setStatus("Turn on the overlay before refreshing secondary captions.");
+      return;
+    }
+
+    const loadVideoId = state.currentVideoId;
+    const primaryKey = state.settings.primaryKey;
+    const secondaryKey = state.settings.secondaryKey;
+    const primaryOption = getOption(primaryKey);
+    const secondaryOption = resolveSecondaryOption(getOption(secondaryKey), primaryOption);
+    if (!secondaryOption) {
+      setStatus("Select a secondary caption track.");
+      return;
+    }
+
+    state.secondaryCaptions = [];
+    state.secondaryCursor = -1;
+    state.lastSecondaryText = "";
+    dom.secondaryLine.textContent = "";
+    updateOverlayVisibility();
+    setStatus("Refreshing secondary captions.");
+
+    state.secondaryRefreshInFlight = true;
+    dom.refreshSecondaryButton.disabled = true;
+    let secondaryResult;
+    try {
+      secondaryResult = await loadCaptionSet(secondaryOption, {
+        fixTraditionalChinese: true,
+        bypassCache: true
+      });
+    } finally {
+      state.secondaryRefreshInFlight = false;
+      dom.refreshSecondaryButton.disabled = false;
+    }
+
+    if (loadVideoId !== state.currentVideoId || primaryKey !== state.settings.primaryKey || secondaryKey !== state.settings.secondaryKey) {
+      return;
+    }
+
+    state.secondaryCaptions = secondaryResult.captions;
+    state.secondaryCursor = -1;
+
+    if (secondaryResult.error) {
+      console.warn("[Dual YouTube Caption Overlay] Secondary caption refresh failed", secondaryResult.error);
+      if (isRateLimitError(secondaryResult.error)) {
+        setStatus("YouTube rate-limited caption requests. Wait briefly, then refresh secondary again.");
+      } else {
+        setStatus("Could not refresh secondary captions.");
+      }
+    } else if (!state.secondaryCaptions.length) {
+      setStatus(`Secondary captions refreshed but empty. Primary ${state.primaryCaptions.length}, secondary 0.`);
+    } else {
+      setStatus(`Secondary captions refreshed: primary ${state.primaryCaptions.length}, secondary ${state.secondaryCaptions.length}.`);
+    }
+    if (state.sync) state.sync.flush();
+  }
+
   async function loadCaptionSet(option, settings = {}) {
     try {
       return {
@@ -559,7 +627,7 @@
     if (!url) return [];
     const isTranslation = Boolean(fetchOption.track.translationLanguageCode);
     const cacheKey = `${url}|hant:${Boolean(fetchOption.track.convertFromSimplifiedChinese)}`;
-    if (state.fetchCache.has(cacheKey)) return state.fetchCache.get(cacheKey);
+    if (!settings.bypassCache && state.fetchCache.has(cacheKey)) return state.fetchCache.get(cacheKey);
 
     const promise = (async () => {
       let directError = null;
@@ -596,6 +664,19 @@
         }
       }
 
+      if (shouldTryNativeTraditionalChineseFallback(option, fetchOption, settings)) {
+        try {
+          const nativeTraditionalCaptions = await fetchCaptions(option, {
+            ...settings,
+            fixTraditionalChinese: false,
+            skipNativeTraditionalChineseFallback: true
+          });
+          if (nativeTraditionalCaptions.length) return nativeTraditionalCaptions;
+        } catch (error) {
+          capturedError = capturedError || error;
+        }
+      }
+
       if (directError) throw directError;
       if (capturedError) throw capturedError;
       return captions;
@@ -609,19 +690,42 @@
     return promise;
   }
 
+  function shouldTryNativeTraditionalChineseFallback(option, fetchOption, settings) {
+    return Boolean(
+      settings.fixTraditionalChinese &&
+      !settings.skipNativeTraditionalChineseFallback &&
+      fetchOption &&
+      fetchOption.track &&
+      fetchOption.track.convertFromSimplifiedChinese &&
+      isTraditionalChineseTranslation(option)
+    );
+  }
+
   function getCaptionFetchOption(option, settings) {
     if (!settings.fixTraditionalChinese || !isTraditionalChineseTranslation(option)) return option;
 
+    const simplifiedLanguageCode = getSimplifiedChineseTranslationLanguageCode();
     return {
       ...option,
       track: {
         ...option.track,
-        languageCode: "zh-Hans",
-        translationLanguageCode: "zh-Hans",
+        languageCode: simplifiedLanguageCode,
+        translationLanguageCode: simplifiedLanguageCode,
         displayLanguageCode: option.track.languageCode,
         convertFromSimplifiedChinese: true
       }
     };
+  }
+
+  function getSimplifiedChineseTranslationLanguageCode() {
+    const candidates = state.translations
+      .map((language) => language && language.languageCode)
+      .filter((languageCode) => normalizeLanguageCode(languageCode) === "zh-Hans");
+
+    return candidates.find((languageCode) => languageCode === "zh-CN") ||
+      candidates.find((languageCode) => languageCode === "zh-Hans") ||
+      candidates[0] ||
+      "zh-Hans";
   }
 
   function finalizeCaptions(captions, option) {
