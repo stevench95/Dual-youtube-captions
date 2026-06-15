@@ -90,7 +90,8 @@
     responseRequestTimer: 0,
     buttonRetryTimer: 0,
     secondaryRefreshInFlight: false,
-    rateLimitedUntil: 0
+    secondaryRefreshCooldownUntil: 0,
+    rateLimitedCaptionKeys: new Map()
   };
 
   const dom = {};
@@ -528,7 +529,8 @@
 
     const hasSelection = Boolean(primaryOption || secondaryOption);
     if (errors.some(isRateLimitError)) {
-      setStatus("YouTube rate-limited caption requests. Wait briefly, then refresh captions.");
+      setStatus(`YouTube rate-limited caption requests. Try again in ${getRateLimitWaitSeconds()}s.`);
+      updateRefreshSecondaryButtonState();
     } else if (!primary.length && !secondary.length && errors.length) {
       setStatus("Could not load selected captions.");
     } else if (!primary.length && !secondary.length && hasSelection) {
@@ -552,26 +554,33 @@
       setStatus("Turn on the overlay before refreshing secondary captions.");
       return;
     }
+    const primaryOption = getOption(state.settings.primaryKey);
+    const secondaryOption = resolveSecondaryOption(getOption(state.settings.secondaryKey), primaryOption);
+    const secondaryCacheKey = getCaptionCacheKey(secondaryOption, { fixTraditionalChinese: true });
+    if (isCaptionKeyRateLimited(secondaryCacheKey)) {
+      setStatus(`YouTube rate-limited secondary captions. Try again in ${getCaptionKeyRateLimitWaitSeconds(secondaryCacheKey)}s.`);
+      updateRefreshSecondaryButtonState();
+      return;
+    }
+    if (isSecondaryRefreshCoolingDown()) {
+      setStatus(`Secondary refresh is cooling down. Try again in ${getSecondaryRefreshCooldownWaitSeconds()}s.`);
+      updateRefreshSecondaryButtonState();
+      return;
+    }
 
     const loadVideoId = state.currentVideoId;
     const primaryKey = state.settings.primaryKey;
     const secondaryKey = state.settings.secondaryKey;
-    const primaryOption = getOption(primaryKey);
-    const secondaryOption = resolveSecondaryOption(getOption(secondaryKey), primaryOption);
     if (!secondaryOption) {
       setStatus("Select a secondary caption track.");
       return;
     }
 
-    state.secondaryCaptions = [];
-    state.secondaryCursor = -1;
-    state.lastSecondaryText = "";
-    dom.secondaryLine.textContent = "";
-    updateOverlayVisibility();
     setStatus("Refreshing secondary captions.");
 
+    setSecondaryRefreshCooldown();
     state.secondaryRefreshInFlight = true;
-    dom.refreshSecondaryButton.disabled = true;
+    updateRefreshSecondaryButtonState();
     let secondaryResult;
     try {
       secondaryResult = await loadCaptionSet(secondaryOption, {
@@ -580,26 +589,27 @@
       });
     } finally {
       state.secondaryRefreshInFlight = false;
-      dom.refreshSecondaryButton.disabled = false;
+      updateRefreshSecondaryButtonState();
     }
 
     if (loadVideoId !== state.currentVideoId || primaryKey !== state.settings.primaryKey || secondaryKey !== state.settings.secondaryKey) {
       return;
     }
 
-    state.secondaryCaptions = secondaryResult.captions;
-    state.secondaryCursor = -1;
-
     if (secondaryResult.error) {
       console.warn("[Dual YouTube Caption Overlay] Secondary caption refresh failed", secondaryResult.error);
       if (isRateLimitError(secondaryResult.error)) {
-        setStatus("YouTube rate-limited caption requests. Wait briefly, then refresh secondary again.");
+        setStatus(`YouTube rate-limited secondary captions. Try again in ${getCaptionKeyRateLimitWaitSeconds(secondaryCacheKey)}s.`);
+        updateRefreshSecondaryButtonState();
       } else {
         setStatus("Could not refresh secondary captions.");
       }
-    } else if (!state.secondaryCaptions.length) {
-      setStatus(`Secondary captions refreshed but empty. Primary ${state.primaryCaptions.length}, secondary 0.`);
+    } else if (!secondaryResult.captions.length) {
+      setStatus(`Secondary captions refreshed but empty. Previous secondary kept: ${state.secondaryCaptions.length}.`);
     } else {
+      state.secondaryCaptions = secondaryResult.captions;
+      state.secondaryCursor = -1;
+      state.lastSecondaryText = "";
       setStatus(`Secondary captions refreshed: primary ${state.primaryCaptions.length}, secondary ${state.secondaryCaptions.length}.`);
     }
     if (state.sync) state.sync.flush();
@@ -626,7 +636,12 @@
     const url = parser.makeCaptionUrl(fetchOption.track);
     if (!url) return [];
     const isTranslation = Boolean(fetchOption.track.translationLanguageCode);
-    const cacheKey = `${url}|hant:${Boolean(fetchOption.track.convertFromSimplifiedChinese)}`;
+    const cacheKey = makeCaptionCacheKey(url, fetchOption);
+    if (isCaptionKeyRateLimited(cacheKey)) {
+      const error = new Error("Caption request paused after YouTube rate limit.");
+      error.status = 429;
+      throw error;
+    }
     if (!settings.bypassCache && state.fetchCache.has(cacheKey)) return state.fetchCache.get(cacheKey);
 
     const promise = (async () => {
@@ -635,7 +650,7 @@
       let captions = [];
 
       try {
-        captions = await fetchAndParseCaptionUrl(url);
+        captions = await fetchAndParseCaptionUrl(url, cacheKey);
       } catch (error) {
         directError = error;
       }
@@ -657,23 +672,10 @@
               ...fetchOption.track,
               baseUrl: captured.url
             });
-          const capturedCaptions = await fetchAndParseCaptionUrl(resolvedUrl);
+          const capturedCaptions = await fetchAndParseCaptionUrl(resolvedUrl, cacheKey);
           if (capturedCaptions.length) return finalizeCaptions(capturedCaptions, fetchOption);
         } catch (error) {
           capturedError = error;
-        }
-      }
-
-      if (shouldTryNativeTraditionalChineseFallback(option, fetchOption, settings)) {
-        try {
-          const nativeTraditionalCaptions = await fetchCaptions(option, {
-            ...settings,
-            fixTraditionalChinese: false,
-            skipNativeTraditionalChineseFallback: true
-          });
-          if (nativeTraditionalCaptions.length) return nativeTraditionalCaptions;
-        } catch (error) {
-          capturedError = capturedError || error;
         }
       }
 
@@ -681,6 +683,10 @@
       if (capturedError) throw capturedError;
       return captions;
     })()
+      .then((captionsResult) => {
+        if (!captionsResult.length) state.fetchCache.delete(cacheKey);
+        return captionsResult;
+      })
       .catch((error) => {
         state.fetchCache.delete(cacheKey);
         throw error;
@@ -690,15 +696,16 @@
     return promise;
   }
 
-  function shouldTryNativeTraditionalChineseFallback(option, fetchOption, settings) {
-    return Boolean(
-      settings.fixTraditionalChinese &&
-      !settings.skipNativeTraditionalChineseFallback &&
-      fetchOption &&
-      fetchOption.track &&
-      fetchOption.track.convertFromSimplifiedChinese &&
-      isTraditionalChineseTranslation(option)
-    );
+  function getCaptionCacheKey(option, settings = {}) {
+    if (!option || !option.track) return "";
+
+    const fetchOption = getCaptionFetchOption(option, settings);
+    const url = parser.makeCaptionUrl(fetchOption.track);
+    return url ? makeCaptionCacheKey(url, fetchOption) : "";
+  }
+
+  function makeCaptionCacheKey(url, fetchOption) {
+    return `${url}|hant:${Boolean(fetchOption && fetchOption.track && fetchOption.track.convertFromSimplifiedChinese)}`;
   }
 
   function getCaptionFetchOption(option, settings) {
@@ -773,10 +780,12 @@
     };
   }
 
-  async function fetchAndParseCaptionUrl(url) {
-    if (Date.now() < state.rateLimitedUntil) {
+  async function fetchAndParseCaptionUrl(url, cacheKey) {
+    if (isCaptionKeyRateLimited(cacheKey)) {
       const error = new Error("Caption request paused after YouTube rate limit.");
       error.status = 429;
+      error.captionCacheKey = cacheKey;
+      error.rateLimitedUntil = state.rateLimitedCaptionKeys.get(cacheKey) || 0;
       throw error;
     }
 
@@ -791,7 +800,10 @@
       const error = new Error(`Caption request failed (${status})${detail}`);
       error.status = status;
       if (status === 429) {
-        state.rateLimitedUntil = Date.now() + 60000;
+        const rateLimitedUntil = Date.now() + 60000;
+        setCaptionKeyRateLimited(cacheKey, rateLimitedUntil);
+        error.captionCacheKey = cacheKey;
+        error.rateLimitedUntil = rateLimitedUntil;
       }
       throw error;
     }
@@ -801,6 +813,62 @@
 
   function isRateLimitError(error) {
     return Boolean(error && (error.status === 429 || /\(429\)/.test(error.message || "")));
+  }
+
+  function isCaptionKeyRateLimited(cacheKey) {
+    if (!cacheKey) return false;
+    const rateLimitedUntil = state.rateLimitedCaptionKeys.get(cacheKey) || 0;
+    if (Date.now() < rateLimitedUntil) return true;
+    if (rateLimitedUntil) state.rateLimitedCaptionKeys.delete(cacheKey);
+    return false;
+  }
+
+  function getCaptionKeyRateLimitWaitSeconds(cacheKey) {
+    const rateLimitedUntil = cacheKey ? state.rateLimitedCaptionKeys.get(cacheKey) || 0 : getLatestRateLimitedUntil();
+    return Math.max(1, Math.ceil((rateLimitedUntil - Date.now()) / 1000));
+  }
+
+  function getRateLimitWaitSeconds() {
+    return Math.max(1, Math.ceil((getLatestRateLimitedUntil() - Date.now()) / 1000));
+  }
+
+  function getLatestRateLimitedUntil() {
+    let latest = 0;
+    state.rateLimitedCaptionKeys.forEach((timestamp) => {
+      latest = Math.max(latest, timestamp);
+    });
+    return latest;
+  }
+
+  function setCaptionKeyRateLimited(cacheKey, timestamp) {
+    if (!cacheKey) return;
+    state.rateLimitedCaptionKeys.set(cacheKey, Math.max(state.rateLimitedCaptionKeys.get(cacheKey) || 0, timestamp));
+    updateRefreshSecondaryButtonState();
+    setTimeout(updateRefreshSecondaryButtonState, Math.max(0, timestamp - Date.now()) + 250);
+  }
+
+  function isSecondaryRefreshCoolingDown() {
+    return Date.now() < state.secondaryRefreshCooldownUntil;
+  }
+
+  function getSecondaryRefreshCooldownWaitSeconds() {
+    return Math.max(1, Math.ceil((state.secondaryRefreshCooldownUntil - Date.now()) / 1000));
+  }
+
+  function setSecondaryRefreshCooldown() {
+    state.secondaryRefreshCooldownUntil = Date.now() + 10000;
+    setTimeout(updateRefreshSecondaryButtonState, Math.max(0, state.secondaryRefreshCooldownUntil - Date.now()) + 250);
+  }
+
+  function updateRefreshSecondaryButtonState() {
+    if (!dom.refreshSecondaryButton) return;
+    const primaryOption = getOption(state.settings.primaryKey);
+    const secondaryOption = resolveSecondaryOption(getOption(state.settings.secondaryKey), primaryOption);
+    const secondaryCacheKey = getCaptionCacheKey(secondaryOption, { fixTraditionalChinese: true });
+    dom.refreshSecondaryButton.disabled =
+      state.secondaryRefreshInFlight ||
+      isSecondaryRefreshCoolingDown() ||
+      isCaptionKeyRateLimited(secondaryCacheKey);
   }
 
   function primeYouTubeCaptions(track) {

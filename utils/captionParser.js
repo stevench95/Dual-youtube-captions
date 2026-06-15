@@ -105,6 +105,7 @@
 
     const url = new URL(capturedUrl);
     url.searchParams.set("tlang", languageCode);
+    url.searchParams.delete("origin_tlang");
     url.searchParams.set("fmt", "json3");
     return url.toString();
   }
